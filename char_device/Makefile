@@ -1,8 +1,11 @@
 kVERS = $(shell uname -r)
 
-KERN_DIR = /home/adrain/100ask/100ask_imx6ull-sdk/Linux-4.9.88/build
-export ARCH=arm
-export CROSS_COMPILE=/opt/20161016/gcc-linaro-6.2.1-2016.11-x86_64_arm-linux-gnueabihf/bin/arm-linux-gnueabihf-
+#KERN_DIR = /home/adrain/100ask/100ask_imx6ull-sdk/Linux-4.9.88/build
+KERN_DIR = /home/adrain/devel/study/100ask/risc-v/buildroot-2022.02/output/build/linux-custom
+#export ARCH=arm
+export ARCH=riscv
+#export CROSS_COMPILE=/opt/20161016/gcc-linaro-6.2.1-2016.11-x86_64_arm-linux-gnueabihf/bin/arm-linux-gnueabihf-
+export CROSS_COMPILE=/home/adrain/devel/study/100ask/risc-v/buildroot-2022.02/output/host/bin/riscv64-buildroot-linux-uclibc-
 #kernel modules
 obj-m += globalmem.o
 
