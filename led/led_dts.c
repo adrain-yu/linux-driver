@@ -28,10 +28,10 @@ module_param(led_major, int, S_IRUGO);
 struct led_dev {
 	struct cdev cdev;
 	struct mutex mutex;
+	struct device *dev;
 	int pin[8];
 };
 
-static struct led_dev *led_devp;
 static struct class *led_class;
 
 static volatile unsigned int *CCM_CCGR1                              ;
@@ -57,6 +57,7 @@ static ssize_t led_write (struct file *filp, const char __user *buf, size_t szie
 	struct led_dev *dev = filp->private_data;
 	int minor = iminor(inode);
 	
+	mutex_lock(&dev->mutex);
 	printk("%s %s line %d\n", __FILE__, __FUNCTION__, __LINE__);
 	err = copy_from_user(&status, buf, 1);
 
@@ -78,13 +79,13 @@ static ssize_t led_write (struct file *filp, const char __user *buf, size_t szie
 			*/ 
 		*GPIO5_DR |= (1<<PIN(dev->pin[minor]));
 	}
+	mutex_unlock(&dev->mutex);
 
 	return 0;
 }
 
 static int led_release (struct inode *inode, struct file *filp)
 {
-	printk("ytest %s %d\n", __FUNCTION__, __LINE__);
 	iounmap(CCM_CCGR1);
 	CCM_CCGR1 = NULL;
 	iounmap(IOMUXC_SNVS_SW_MUX_CTL_PAD_SNVS_TAMPER3);
@@ -165,68 +166,50 @@ static void led_setup_cdev(struct led_dev *dev, int index)
 static int led_probe(struct platform_device *pdev)
 {
 	int ret = 0;
-	dev_t devno = 0;
+	struct led_dev *led_devp = NULL;
 
-	devno = MKDEV(led_major, 0);
-	if (led_major)
-		ret = register_chrdev_region(devno, 1, "led");
-	else
-		ret = alloc_chrdev_region(&devno, 0, 1, "led");
-
-
-	if (ret < 0)
-		return ret;
-
-	led_major = MAJOR(devno);
-
+	led_devp = kzalloc(sizeof(struct led_dev), GFP_KERNEL);
 	if (!led_devp) {
-		led_devp = kzalloc(sizeof(struct led_dev), GFP_KERNEL);
-		if (!led_devp) {
-			ret = -ENOMEM;
-			goto fail_malloc;
-		}
+		ret = -ENOMEM;
+		return ret;
 	}
 
-	if (!led_class) {
-		led_class = class_create(THIS_MODULE, "led_class");
-		if (IS_ERR(led_class)) {
-			printk("%s %s line %d\n", __FILE__, __FUNCTION__, __LINE__);
-			ret = -1;
-			goto fail_malloc;
-		}
-	}
-
-	led_setup_cdev(led_devp, 0);
-
-	device_create(led_class, NULL, MKDEV(led_major, g_ledcnt),
+	mutex_init(&(led_devp->mutex));
+	led_setup_cdev(led_devp, g_ledcnt);
+	led_devp->dev = device_create(led_class, NULL, MKDEV(led_major, g_ledcnt),
 					NULL, "led%d", g_ledcnt);
+
+	if (IS_ERR(led_devp->dev)) {
+		printk("ytest device_create error\n");
+		ret = PTR_ERR(led_devp->dev);
+		goto err_dev;
+	}
+	dev_set_drvdata(led_devp->dev, led_devp);
 
 	of_property_read_s32(pdev->dev.of_node, "pint", &(led_devp->pin[g_ledcnt]));
 	g_ledcnt++;
-	mutex_init(&(led_devp->mutex));
 
+	platform_set_drvdata(pdev, led_devp);
 
 	return 0;
-
-fail_malloc:
-	unregister_chrdev_region(MKDEV(led_major, 0), 1);
+err_dev:
+	cdev_del(&led_devp->cdev);
+	kfree(led_devp);
 	return ret;
+
 }
 
-static int led_remove(struct platform_device *device)
+static int led_remove(struct platform_device *pdev)
 {
-	int ret = 0;
-	int i = 0;
+	struct led_dev *dev = platform_get_drvdata(pdev);
+	unsigned int minor = MINOR(dev->cdev.dev);
 
-	for (i = 0; i < g_ledcnt; i++)
-		device_destroy(led_class, MKDEV(led_major, i));
+	device_destroy(led_class, MKDEV(led_major, minor));
+	cdev_del(&(dev->cdev));
+	kfree(dev);
+	platform_set_drvdata(pdev, NULL);
 
-	cdev_del(&(led_devp->cdev));
-	class_destroy(led_class);
-	unregister_chrdev_region(MKDEV(led_major, 0), 1);
-	kfree(led_devp);
-
-	return ret;
+	return 0;
 }
 
 static const struct of_device_id of_match_leds[] = {
@@ -245,9 +228,34 @@ static struct platform_driver led_drv = {
 
 static int led_init(void)
 {
-	int ret = 0;
+	int ret = -EINVAL;
+	dev_t devno = 0;
+
+	devno = MKDEV(led_major, 0);
+
+	led_class = class_create(THIS_MODULE, "led_class");
+	if (IS_ERR(led_class))
+		return IS_ERR(led_class);
+
+	if (led_major)
+		ret = register_chrdev_region(devno, 10, "led");
+	else
+		ret = alloc_chrdev_region(&devno, 0, 10, "led");
+	if (ret)
+		goto err_dev;
+
+	led_major = MAJOR(devno);
 
 	ret = platform_driver_register(&led_drv);
+	if (ret)
+		goto err_plat;
+
+	return 0;
+
+err_plat:
+	unregister_chrdev_region(MKDEV(led_major, 0), 10);
+err_dev:
+	class_destroy(led_class);
 
 	return ret;
 }
@@ -255,7 +263,10 @@ static int led_init(void)
 
 static void led_exit(void)
 {
+	printk("%s %s line %d\n", __FILE__, __FUNCTION__, __LINE__);
 	platform_driver_unregister(&led_drv);
+	class_destroy(led_class);
+	unregister_chrdev_region(MKDEV(led_major, 0), 10);
 }
 
 MODULE_LICENSE("GPL v2");
