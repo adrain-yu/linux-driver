@@ -4,7 +4,7 @@ KERN_DIR = /home/adrain/100ask/100ask_imx6ull-sdk/Linux-4.9.88/build
 export ARCH=arm
 export CROSS_COMPILE=/opt/20161016/gcc-linaro-6.2.1-2016.11-x86_64_arm-linux-gnueabihf/bin/arm-linux-gnueabihf-
 #kernel modules
-obj-m += led_dts.o
+obj-m += ap3216_dts.o
 
 #specify flags for the module compilation
 #EXTRA_CFLAGS = -g -O0
@@ -21,6 +21,6 @@ clean:
 
 	make -C $(KERN_DIR) M=`pwd` modules clean
 	rm -rf modules.order
-	rm -f led_dts.ko
+	rm -f ap3216.ko
 
 
